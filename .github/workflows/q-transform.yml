@@ -1,0 +1,60 @@
+name: Q Code Transformation
+
+on:
+  push:
+    branches:
+      - 'Q-TRANSFORM-issue-*'
+  issues:
+    types: [labeled]
+
+env:
+  MAVEN_CLI_OPTS: "--batch-mode --errors --fail-at-end --show-version -DinstallAtEnd=true -DdeployAtEnd=true"
+
+jobs:
+  q-code-transformation:
+    runs-on: ubuntu-latest
+    if: contains(github.event.label.name, 'Amazon Q transform agent') || startsWith(github.ref, 'refs/heads/Q-TRANSFORM-issue-')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'adopt'
+          
+      - name: Cache Maven dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Build and verify (if Maven project)
+        run: |
+          if [ -f "pom.xml" ]; then
+            echo "Maven project detected"
+            mvn ${{ env.MAVEN_CLI_OPTS }} clean compile
+            mvn ${{ env.MAVEN_CLI_OPTS }} verify
+            mvn ${{ env.MAVEN_CLI_OPTS }} dependency:copy-dependencies -DoutputDirectory=dependencies -Dmdep.useRepositoryLayout=true -Dmdep.copyPom=true -Dmdep.addParentPoms=true
+          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "Gradle project detected"
+            ./gradlew build --no-daemon
+          else
+            echo "No Maven or Gradle build file found, skipping build steps"
+          fi
+
+      - name: Upload artifacts
+        if: hashFiles('dependencies/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: q-code-transformation-dependencies
+          path: dependencies
+          
+      - name: Echo transformation trigger
+        run: |
+          echo "Amazon Q Developer transformation triggered"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch/Issue: ${{ github.ref }}"
